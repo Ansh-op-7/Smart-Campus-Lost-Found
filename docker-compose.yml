@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  # Database Service (MySQL 8.0)
+  mysql:
+    image: mysql:8.0
+    container_name: findit-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-findit_db}
+      MYSQL_USER: ${MYSQL_USER:-findit_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-findit_password}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - findit-network
+
+  # Backend Service (Spring Boot)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: findit-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8080
+      DB_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-findit_db}?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true&createDatabaseIfNotExist=true
+      DB_USERNAME: ${MYSQL_USER:-findit_user}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-findit_password}
+      JWT_SECRET: ${JWT_SECRET:-404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-86400000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost,http://localhost:5173,http://localhost:80}
+      APP_UPLOAD_DIR: /app/uploads/items
+    ports:
+      - "8080:8080"
+    volumes:
+      - uploads_data:/app/uploads/items
+    networks:
+      - findit-network
+
+  # Frontend Service (React + Nginx)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8080}
+    container_name: findit-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+    networks:
+      - findit-network
+
+volumes:
+  mysql_data:
+    driver: local
+  uploads_data:
+    driver: local
+
+networks:
+  findit-network:
+    driver: bridge
